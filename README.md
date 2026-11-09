@@ -45,9 +45,9 @@ has its own version line.
 
 ## Compatibility
 
-| Plugin                       | QAuth server                                                    | AuthMethod contract        | Plugin SDK        |
-| ---------------------------- | --------------------------------------------------------------- | -------------------------- | ----------------- |
-| `0.1.0-rc.0` (not published) | the commit in `e2e/qauth-commit`; no release carries the loader | `qauth-auth-method/1-rc.0` | `0.2.2`, vendored |
+| Plugin                       | QAuth server                                                    | AuthMethod contract        | Plugin SDK                                              |
+| ---------------------------- | --------------------------------------------------------------- | -------------------------- | ------------------------------------------------------- |
+| `0.1.0-rc.0` (not published) | the commit in `e2e/qauth-commit`; no release carries the loader | `qauth-auth-method/1-rc.0` | vendored from qauth-labs/qauth#1069 (not npm's `0.2.2`) |
 
 ## What it is
 
