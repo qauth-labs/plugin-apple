@@ -1,0 +1,68 @@
+{
+  "name": "@qauth-labs/plugin-apple",
+  "version": "0.1.0-rc.0",
+  "description": "Sign in with Apple for QAuth, as a preset on QAuth's own OpenID Connect client: a client secret the server's signer signs, a form_post response, the name Apple sends once and private relay addresses. Experimental.",
+  "keywords": [
+    "qauth",
+    "qauth-plugin",
+    "auth-method",
+    "apple",
+    "sign-in-with-apple",
+    "openid-connect",
+    "sign-in"
+  ],
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/qauth-labs/plugin-apple#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qauth-labs/plugin-apple.git"
+  },
+  "bugs": {
+    "url": "https://github.com/qauth-labs/plugin-apple/issues"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=26.10.0"
+  },
+  "packageManager": "pnpm@12.14.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "test": "vitest run",
+    "e2e": "bash e2e/run.sh",
+    "prepack": "pnpm run build"
+  },
+  "dependencies": {
+    "@qauth-labs/plugin-sdk": "file:vendor/qauth-labs-plugin-sdk-0.2.2.tgz"
+  },
+  "peerDependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "oxfmt": "0.73.0",
+    "oxlint": "1.88.0",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.5",
+    "zod": "^4.6.7"
+  }
+}
