@@ -16,5 +16,8 @@
     "skipLibCheck": false,
     "noEmit": true
   },
-  "include": ["src", "test", "e2e", "*.ts"]
+  "include": ["src", "test", "e2e", "*.ts"],
+  // The QAuth checkout e2e/qauth-images.sh builds the images from, and the
+  // end-to-end suite's generated files.
+  "exclude": ["e2e/.work", "e2e/.work-qauth"]
 }
