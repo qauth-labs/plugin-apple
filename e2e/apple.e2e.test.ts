@@ -405,8 +405,16 @@ describe('a sign-in, while the server cannot sign the client secret (qauth-labs/
     expect(await callback.text()).toContain(ERROR_TITLE);
     expect(callback.headers.get('location')).toBeNull();
     expect(failedSignIns('method_fault')).toBe(faultsBefore + 1);
+    // Why: the signer holds no client record for Apple in the realm, the
+    // part of qauth-labs/qauth#1073 that findUpstreamClient leaves out.
     expect(logLinesOf('auth-server')).toContainEqual(
-      expect.objectContaining({ msg: 'upstream method fault', upstreamProvider: 'apple' })
+      expect.objectContaining({
+        msg: 'upstream method fault',
+        upstreamProvider: 'apple',
+        err: expect.objectContaining({
+          message: expect.stringContaining('has no configuration for the upstream provider'),
+        }),
+      })
     );
     // The signer refused before anything was sent: no token request, no client secret.
     const calls = (await mockCalls())
