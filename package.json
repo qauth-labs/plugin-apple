@@ -1,6 +1,6 @@
 {
   "name": "@qauth-labs/plugin-apple",
-  "version": "0.1.0-rc.0",
+  "version": "0.1.0",
   "description": "Sign in with Apple for QAuth, as a preset on QAuth's own OpenID Connect client: a client secret the server's signer signs, a form_post response, the name Apple sends once and private relay addresses. Experimental.",
   "keywords": [
     "qauth",

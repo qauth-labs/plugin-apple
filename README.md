@@ -26,6 +26,7 @@ and has its own version line.
 
 | Plugin       | QAuth server               | AuthMethod contract        | Plugin SDK |
 | ------------ | -------------------------- | -------------------------- | ---------- |
+| `0.1.0`      | `0.2.4` and later on `0.2` | `qauth-auth-method/1-rc.0` | `0.2.4`    |
 | `0.1.0-rc.0` | `0.2.4` and later on `0.2` | `qauth-auth-method/1-rc.0` | `0.2.4`    |
 
 QAuth `0.2.4` is the first release whose signer imports the key Apple issues
@@ -150,7 +151,7 @@ image): write a lockfile in a `plugins/` directory of your build context,
 mkdir plugins && cd plugins
 npm init --yes > /dev/null
 npm install --package-lock-only --save-exact --omit=dev --omit=peer \
-  --install-strategy=nested --ignore-scripts @qauth-labs/plugin-apple@0.1.0-rc.0
+  --install-strategy=nested --ignore-scripts @qauth-labs/plugin-apple@0.1.0
 ```
 
 read it, commit both files, and install it into a separate stage, nested, so
