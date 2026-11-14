@@ -1,4 +1,5 @@
 import {
+  AUTH_METHOD_DISPLAY_NAME_PATTERN,
   authMethodRoutePrefix,
   defineUpstreamOidcPreset,
   type UpstreamClaimAttribute,
@@ -19,12 +20,12 @@ import { z } from 'zod';
  * - **The client secret is a JWT** signed with a key registered at Apple
  *   (`signed_client_secret`). The plugin holds no key: for each token request
  *   the server's signer role signs one with the realm's
- *   `upstream_client_assertion` key for the type `apple`, ES256, valid 60
- *   seconds, `sub` the Services ID and `aud` Apple's issuer. Its `iss` is the
- *   developer team's Team ID, which the realm's config holds (`teamId`). No
- *   server signs it yet: the signer can neither import the key Apple issues
- *   nor read the Team ID (qauth-labs/qauth#1073), so the code exchange fails
- *   closed.
+ *   `upstream_client_assertion` key for the type `apple`, the key Apple
+ *   issued, which an operator imports under its Key ID
+ *   (`plugins.keys.import`). It is ES256, valid 60 seconds, `sub` the
+ *   Services ID and `aud` Apple's issuer. Its `iss` is the developer team's
+ *   Team ID, which the realm's config holds (`teamId`) and the provider
+ *   config names as the signed client secret's `assertionIssuer`.
  * - **The response arrives as `form_post`**, a cross-site POST, which the
  *   server bounces to the GET callback so the browser brings the flow cookie.
  * - **The person's name arrives once**, in the `user` member of the first
@@ -104,8 +105,7 @@ export const configSchema = z.strictObject({
   clientId: z.string().min(1).max(MAX_APPLE_SERVICES_ID_LENGTH),
   /**
    * The developer team's Team ID, such as `A1B2C3D4E5`: the client secret's
-   * `iss`. No server reads it yet: the plugin SDK gives a preset no way to
-   * name the issuer of its signed client secret (qauth-labs/qauth#1073).
+   * `iss`, which the provider config names as its `assertionIssuer`.
    */
   teamId: z.string().regex(APPLE_TEAM_ID_PATTERN),
   /**
@@ -122,7 +122,8 @@ export type AppleConfig = z.output<typeof configSchema>;
 /**
  * The provider config the server's client runs on, for a parsed config: the
  * issuer by discovery, the Services ID, a client secret the signer role signs
- * with ES256, the `name` and `email` scopes by `form_post`, RS256 ID tokens.
+ * with ES256 as the Team ID, the `name` and `email` scopes by `form_post`,
+ * RS256 ID tokens.
  */
 export function upstreamConfig(config: AppleConfig): UpstreamOidcProviderConfig {
   return {
@@ -131,6 +132,10 @@ export function upstreamConfig(config: AppleConfig): UpstreamOidcProviderConfig 
     clientAuthentication: {
       method: 'signed_client_secret',
       signingAlgorithm: APPLE_CLIENT_SECRET_ALGORITHM,
+      // The client secret's `iss`: the developer team, not the Services ID.
+      // The admin API stores it beside the realm's config, where the signer
+      // reads it.
+      assertionIssuer: config.teamId,
     },
     scopes: [...APPLE_SCOPES],
     // Apple asks for form_post whenever the scopes name `name` or `email`.
@@ -163,14 +168,20 @@ export const APPLE_ATTRIBUTES: readonly UpstreamClaimAttribute[] = Object.freeze
   { claim: 'family_name' },
 ]);
 
-/** A name part as the preset keeps it: a non-blank string, trimmed, of plain text. */
+/**
+ * A name part as the preset keeps it: a non-blank string, trimmed, that
+ * passes the plugin SDK's display rule (`AUTH_METHOD_DISPLAY_NAME_PATTERN`),
+ * as the name of a sign-in method must. So it holds no markup bracket, no
+ * control character, no format character (a bidirectional override or
+ * isolate, a zero-width character), no private-use, surrogate or unassigned
+ * code point, no line or paragraph separator and no Hangul filler: nothing
+ * that would make a name shown to someone else read as another.
+ */
 function namePart(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   if (trimmed.length === 0 || trimmed.length > MAX_APPLE_NAME_LENGTH) return undefined;
-  // Matching control characters is the point.
-  // oxlint-disable-next-line no-control-regex
-  if (/[\u0000-\u001f\u007f-\u009f]/.test(trimmed)) return undefined;
+  if (!AUTH_METHOD_DISPLAY_NAME_PATTERN.test(trimmed)) return undefined;
   return trimmed;
 }
 

@@ -121,6 +121,26 @@ describe('the user member', () => {
     ['{"name":{"firstName":"","lastName":"  "}}', undefined],
     ['{"name":{"firstName":"A\\u0000da"}}', undefined],
     ['{"name":{"firstName":"A\\u009bda"}}', undefined],
+    // Characters that make a name read as another: a bidirectional override
+    // and isolate, zero-width characters, line and paragraph separators, a
+    // private-use code point, a Hangul filler and a markup bracket.
+    ['{"name":{"firstName":"Ada\\u202eecalevol"}}', undefined],
+    ['{"name":{"firstName":"\\u2066Ada\\u2069"}}', undefined],
+    ['{"name":{"firstName":"A\\u200bda"}}', undefined],
+    ['{"name":{"firstName":"A\\u200dda"}}', undefined],
+    ['{"name":{"firstName":"Ada\\ufeffx"}}', undefined],
+    ['{"name":{"firstName":"Ada\\u2028Lovelace"}}', undefined],
+    ['{"name":{"firstName":"Ada\\u2029Lovelace"}}', undefined],
+    ['{"name":{"firstName":"A\\ue000da"}}', undefined],
+    ['{"name":{"firstName":"\\u3164"}}', undefined],
+    ['{"name":{"firstName":"<b>Ada</b>"}}', undefined],
+    ['{"name":{"firstName":"A\\u202eda","lastName":"Lovelace"}}', { lastName: 'Lovelace' }],
+    // Letters of every script stay, and so do the marks and spaces of a name.
+    [
+      '{"name":{"firstName":"José María","lastName":"Ñúñez-O\'Brien"}}',
+      { firstName: 'José María', lastName: "Ñúñez-O'Brien" },
+    ],
+    ['{"name":{"firstName":"李","lastName":"小龍"}}', { firstName: '李', lastName: '小龍' }],
     [`{"name":{"firstName":"${'a'.repeat(257)}"}}`, undefined],
     ['{"name":{"firstName":42}}', undefined],
     ['{"name":"Ada"}', undefined],

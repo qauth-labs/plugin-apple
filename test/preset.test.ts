@@ -127,27 +127,37 @@ describe('the provider config', () => {
   const provider = preset.upstreamConfig(config);
 
   // Acceptance (qauth-labs/qauth#1076): the config gives the signed client
-  // secret, with the Services ID as the client id.
+  // secret, with the Team ID as assertionIssuer and the Services ID as the
+  // client id.
   it('gives a client secret the signer role signs with ES256, and the Services ID as the client id', () => {
     expect(provider.clientId).toBe(SERVICES_ID);
-    expect(provider.clientAuthentication).toEqual({
+    expect(provider.clientAuthentication).toMatchObject({
       method: UPSTREAM_SIGNED_CLIENT_SECRET,
       signingAlgorithm: 'ES256',
     });
   });
 
-  // The other half of that criterion. The SDK's provider config has no member
-  // that names the issuer of a signed client secret, and the server refuses any
-  // member it does not know, so the preset cannot hand the Team ID on yet.
-  it.todo(
-    'gives the Team ID as the assertionIssuer of the signed client secret (qauth-labs/qauth#1073: the plugin SDK has no assertionIssuer yet)'
-  );
+  it('gives the Team ID as the assertionIssuer of the signed client secret, never the Services ID', () => {
+    expect(provider.clientAuthentication).toEqual({
+      method: UPSTREAM_SIGNED_CLIENT_SECRET,
+      signingAlgorithm: 'ES256',
+      assertionIssuer: TEAM_ID,
+    });
+    const other = preset.upstreamConfig(
+      preset.configSchema.parse({ clientId: SERVICES_ID, teamId: 'Z9Y8X7W6V5' })
+    );
+    expect(other.clientAuthentication).toMatchObject({ assertionIssuer: 'Z9Y8X7W6V5' });
+  });
 
   it('asks Apple’s issuer by discovery for the name and email, by form_post, with RS256 ID tokens', () => {
     expect(provider).toEqual({
       issuer: 'https://appleid.apple.com',
       clientId: SERVICES_ID,
-      clientAuthentication: { method: 'signed_client_secret', signingAlgorithm: 'ES256' },
+      clientAuthentication: {
+        method: 'signed_client_secret',
+        signingAlgorithm: 'ES256',
+        assertionIssuer: TEAM_ID,
+      },
       scopes: ['openid', 'name', 'email'],
       responseMode: 'form_post',
       idTokenSigningAlgorithms: ['RS256'],
