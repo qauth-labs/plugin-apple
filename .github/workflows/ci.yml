@@ -2,8 +2,8 @@
 # calls this workflow): format (Oxfmt), lint (Oxlint), type-check, the unit
 # tests and the plugin SDK's preset kit (checkUpstreamOidcPreset), the build
 # and the tarball's file list; then the end-to-end suite (e2e/run.sh), which
-# runs QAuth's server image with this plugin installed on top, against a
-# mock Apple. pnpm's version is package.json's packageManager.
+# runs the released QAuth server image with this plugin installed on top,
+# against a mock Apple. pnpm's version is package.json's packageManager.
 name: ci
 
 on:
@@ -43,12 +43,16 @@ jobs:
         run: |
           set -euo pipefail
           pnpm pack --pack-destination "$RUNNER_TEMP/pack"
-          tar -tzf "$RUNNER_TEMP"/pack/*.tgz
+          tar -tzf "$RUNNER_TEMP"/pack/*.tgz | tee "$RUNNER_TEMP/files.txt"
+          # The sources and the tests are never published.
+          if grep -Eq '^package/(e2e|test|src)/' "$RUNNER_TEMP/files.txt"; then
+            echo "The tarball holds files npm must not receive." >&2
+            exit 1
+          fi
 
   e2e:
     runs-on: ubuntu-24.04
-    # Building QAuth's two images from source takes most of it (qauth-images.sh).
-    timeout-minutes: 45
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,10 +63,5 @@ jobs:
           node-version: 26
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Temporary: no released QAuth image carries the preset loader yet
-      # (qauth-labs/qauth#671), so the server and migration-runner images are
-      # built from the commit e2e/qauth-commit names.
-      - name: QAuth's server and migration-runner images, from e2e/qauth-commit
-        run: bash e2e/qauth-images.sh
-      - name: The server image plus the plugin, against a mock Apple
+      - name: The released server image plus the plugin, against a mock Apple
         run: bash e2e/run.sh

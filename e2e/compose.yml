@@ -1,10 +1,6 @@
-# The end-to-end suite's deployment (run.sh starts it): QAuth's server with
-# this plugin added (Dockerfile), its migration runner, PostgreSQL, Redis and
-# a mock Apple.
-#
-# QAUTH_IMAGE and QAUTH_MIGRATION_IMAGE are the QAuth images run.sh names:
-# until a released image carries the preset loader (qauth-labs/qauth#671),
-# the ones qauth-images.sh builds from the commit e2e/qauth-commit names.
+# The end-to-end suite's deployment (run.sh starts it): QAuth's released
+# images, the server with this plugin added (Dockerfile) and its migration
+# runner, with PostgreSQL, Redis and a mock Apple.
 #
 # The mock answers at Apple's own host name, appleid.apple.com, a network
 # alias: the server's egress client resolves names through DNS. It sits on a
@@ -23,8 +19,6 @@ x-server: &server
   build:
     context: .
     dockerfile: Dockerfile
-    args:
-      QAUTH_IMAGE: ${QAUTH_IMAGE:?run e2e/run.sh}
   image: plugin-apple-e2e/auth-server:local
   environment: &server-env
     NODE_ENV: production
@@ -102,7 +96,7 @@ services:
       retries: 30
 
   migrate:
-    image: ${QAUTH_MIGRATION_IMAGE:?run e2e/run.sh}
+    image: ghcr.io/qauth-labs/qauth/migration-runner:0.2.4@sha256:6c3d664c3fb2fd1c62b60933bf0a40ba16f6204433a2b9ef32911689709ba1a3
     environment:
       DATABASE_URL: postgres://qauth:qauth@postgres:5432/qauth
     depends_on:

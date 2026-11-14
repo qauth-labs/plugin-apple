@@ -1,17 +1,11 @@
 #!/usr/bin/env bash
-# The end-to-end suite: QAuth's server image with this plugin installed the
-# way an operator installs it, against a mock Apple, driven over HTTP by
-# e2e/apple.e2e.test.ts.
+# The end-to-end suite: QAuth's released server image with this plugin
+# installed the way an operator installs it, against a mock Apple, driven
+# over HTTP by e2e/apple.e2e.test.ts.
 #
-# Needs docker (with compose), git, openssl, node and pnpm. Run it from
-# anywhere:
+# Needs docker (with compose), openssl, node and pnpm. Run it from anywhere:
 #
 #   pnpm run e2e
-#
-# QAUTH_IMAGE and QAUTH_MIGRATION_IMAGE name the server and migration-runner
-# images. Until a released image carries the preset loader
-# (qauth-labs/qauth#671), they default to the images qauth-images.sh builds
-# from the commit e2e/qauth-commit names, and run.sh runs it first.
 #
 # It packs the plugin as npm would receive it, makes throwaway secrets, a
 # throwaway CA and a test key in e2e/.work/, builds the image (e2e/Dockerfile),
@@ -23,14 +17,6 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(dirname "$here")"
 work="$here/.work"
 compose=(docker compose --file "$here/compose.yml")
-
-commit="$(tr -d '[:space:]' < "$here/qauth-commit")"
-if [ -z "${QAUTH_IMAGE:-}" ] && [ -z "${QAUTH_MIGRATION_IMAGE:-}" ]; then
-  bash "$here/qauth-images.sh"
-fi
-QAUTH_IMAGE="${QAUTH_IMAGE:-qauth-e2e/auth-server:$commit}"
-QAUTH_MIGRATION_IMAGE="${QAUTH_MIGRATION_IMAGE:-qauth-e2e/migration-runner:$commit}"
-export QAUTH_IMAGE QAUTH_MIGRATION_IMAGE
 
 rm -rf "$work"
 mkdir -p "$work/certs" "$work/ca" "$work/keys" "$work/pack"
@@ -61,8 +47,8 @@ export JWT_PRIVATE_KEY JWT_PUBLIC_KEY KEK SESSION_COOKIE_SECRET
 # The developer team at the mock Apple: its Team ID, the Services ID, and the
 # key Apple would issue for Sign in with Apple, a P-256 key in PKCS #8 as
 # Apple's .p8 file is, under a ten-character Key ID. The mock holds its public
-# half; the private half is what an operator imports into QAuth's signer
-# (qauth-labs/qauth#1073). The plugin never sees it.
+# half; the private half is what the suite imports into QAuth's signer, as an
+# operator does (plugins.keys.import). The plugin never sees it.
 MOCK_APPLE_TEAM_ID="$(openssl rand -hex 5 | tr 'a-f' 'A-F')"
 MOCK_APPLE_KEY_ID="$(openssl rand -hex 5 | tr 'a-f' 'A-F')"
 MOCK_APPLE_SERVICES_ID="dev.qauth.plugin-apple.e2e"
@@ -74,11 +60,9 @@ export MOCK_APPLE_TEAM_ID MOCK_APPLE_KEY_ID MOCK_APPLE_SERVICES_ID MOCK_APPLE_PU
 # The allowlist is read through a bind mount; others must not be able to write it.
 chmod 644 "$here/egress-allowlist.json"
 
-# The plugin as npm would receive it, and the plugin SDK it depends on: the
-# vendored tarball, until the SDK is on npm (vendor/README.md).
+# The plugin as npm would receive it.
 (cd "$root" && pnpm run build > /dev/null && pnpm pack --pack-destination "$work/pack" > /dev/null)
 cp "$work"/pack/*.tgz "$work/plugin.tgz"
-cp "$root/vendor/qauth-labs-plugin-sdk-0.2.2.tgz" "$work/plugin-sdk.tgz"
 
 finish() {
   local status=$?

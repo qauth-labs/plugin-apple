@@ -4,14 +4,16 @@
 # Supply-chain cooldown: a version is resolved only once it has been on the
 # registry for 7 days (10080 minutes), long enough for a hijacked release to be
 # reported and pulled. A version may be taken sooner only when it is listed
-# under minimumReleaseAgeExclude by exact version, with why and when it
-# matures; remove each once it matures.
-#
-# The plugin SDK is not resolved from the registry yet: it is the vendored
-# tarball in vendor/ (vendor/README.md), until the SDK release that carries
-# qauth-labs/qauth#671 is on npm. When that release is younger than 7 days,
-# list it under minimumReleaseAgeExclude by exact version.
+# below by exact version, with why and when it matures; remove each once it
+# matures.
 minimumReleaseAge: 10080
+minimumReleaseAgeExclude:
+  # QAuth's plugin SDK, provenance-signed by qauth-labs/qauth's release-npm
+  # workflow at tag v0.2.4: the first release whose signed client secret names
+  # an assertion issuer (qauth-labs/qauth#1073), the Team ID this plugin hands
+  # the signer.
+  # Published 2026-11-14T05:24:24Z: remove after 2026-11-21T05:24Z.
+  - '@qauth-labs/plugin-sdk@0.2.4'
 
 # Never auto-install before a script runs; warn when node_modules is stale.
 verifyDepsBeforeRun: warn

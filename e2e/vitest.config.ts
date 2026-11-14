@@ -5,9 +5,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['e2e/*.e2e.test.ts'],
-    // Never the QAuth checkout qauth-images.sh builds the images from, nor
-    // the run's generated files.
-    exclude: ['**/node_modules/**', 'e2e/.work/**', 'e2e/.work-qauth/**'],
+    // Never the run's generated files.
+    exclude: ['**/node_modules/**', 'e2e/.work/**'],
     environment: 'node',
     // One deployment, one realm: the tests run in order, in one file.
     fileParallelism: false,
