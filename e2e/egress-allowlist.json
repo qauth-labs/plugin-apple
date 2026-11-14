@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "host": "appleid.apple.com",
+      "realms": ["master"],
+      "note": "The mock Apple's host name, as an operator would list a private provider. A preset's calls are remote_document destinations, which no allowlist entry opens: the mock sits on a public address instead (compose.yml)."
+    }
+  ]
+}
