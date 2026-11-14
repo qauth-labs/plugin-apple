@@ -1,20 +1,20 @@
 /**
- * The plugin end to end, where an operator runs it: QAuth's server image with
- * the plugin installed on top (e2e/Dockerfile), against a mock Apple at
- * Apple's own host name. The suite configures the plugin through the admin
- * API, as an operator does, and signs in through the server's pages and
- * Apple's cross-site `form_post`, as a browser does.
+ * The plugin end to end, where an operator runs it: QAuth's released server
+ * image with the plugin installed on top (e2e/Dockerfile), against a mock
+ * Apple at Apple's own host name. The suite configures the plugin through
+ * the admin API and imports the team's key into the server's signer, as an
+ * operator does, and signs in through the server's pages and Apple's
+ * cross-site `form_post`, as a browser does.
  *
- * KNOWN GAP (qauth-labs/qauth#1073). The server's signer can neither import
- * the key Apple issues nor read the Team ID, so it signs no client secret for
- * Apple and every code exchange fails closed. What works without it is
- * checked here: the plugin loads, and is skipped with PLUGIN_API_ENABLED off;
- * the authorization request goes to Apple by `form_post`; Apple's cross-site
- * post is bounced to the GET callback with only the name of its `user`
- * member; then the code exchange fails closed and creates no account. The
- * cases that need the signer are `it.todo`, written out: the mock already
- * checks the client secret as Apple does, so they only need turning on once
- * `importAppleKey` can call the server.
+ * In order: the plugin loads, and is skipped with PLUGIN_API_ENABLED off; the
+ * admin API refuses the key before the plugin is configured, then takes the
+ * Services ID and the Team ID. A sign-in before the key is imported goes to
+ * Apple by `form_post`, is bounced to the GET callback with only the name of
+ * the `user` member, and then fails closed at the code exchange: the signer
+ * holds no key for Apple, so nothing is sent and no account is created. Once
+ * the key is imported, the mock takes the client secret the signer signs
+ * only as Apple does, the first sign-in stores the name once, and a private
+ * relay address is never the address mailed.
  *
  * Run it through e2e/run.sh.
  */
@@ -61,21 +61,35 @@ const CALLBACK = 'http://localhost:3000/upstream/apple/callback';
 const ERROR_TITLE = 'We could not sign you in';
 
 const SIGN_IN_FAILED = 'urn:qauth:event:user.sign_in_failed:v1-rc.0';
+const REGISTERED = 'urn:qauth:event:user.registered:v1-rc.0';
+
+/**
+ * How long the signer trusts a realm's key list before it reads it again
+ * (QAuth's docs: operate/keys, "each process signs with the new key once it
+ * reads the realm's key list again, within a minute").
+ */
+const SIGNER_KEY_LIST_TRUSTED_MS = 60_000;
 
 const team = appleTeam();
 let admin: Admin;
 let clientId: string;
 let realmId: string;
+/** When a code exchange last made the signer read Apple's empty key list. */
+let emptyKeyListReadAt: number | undefined;
 
 function isRedirect(response: Response): boolean {
   return response.status === 302 || response.status === 303;
 }
 
-/** A person at Apple, with a fresh `sub` and a name unlikely to be anywhere else. */
+/**
+ * A person at Apple, with a fresh `sub` and address, and a name unlikely to
+ * be anywhere else.
+ */
 function person(overrides: Partial<ApplePerson> = {}): ApplePerson {
+  const id = randomBytes(16).toString('hex');
   return {
-    sub: `001234.${randomBytes(16).toString('hex')}.1234`,
-    email: 'appleseedia.fruitwright@example.com',
+    sub: `001234.${id}.1234`,
+    email: `appleseedia.${id.slice(0, 12)}@example.com`,
     emailVerified: 'true',
     isPrivateEmail: 'false',
     firstName: 'Appleseedia',
@@ -216,17 +230,49 @@ async function signIn(
   return { code: await toApplication(jar, callback), verifier };
 }
 
+/** An admin API answer: its status and JSON body. */
+type AdminAnswer = Awaited<ReturnType<Admin['call']>>;
+
 /**
- * Import the team's key into the realm's signer, as its
- * `upstream_client_assertion` key for `apple` under its Key ID, and have the
- * signer sign as the Team ID: the operator's steps of qauth-labs/qauth#1073,
- * which the server does not offer yet. The private key is `team.privateKeyPem`,
- * the `.p8` file run.sh made.
+ * Import the team's key into the realm's signer under its Key ID, as an
+ * operator does (QAuth's docs: operate/keys, "Sign in with Apple, step by
+ * step"): the `.p8` file's contents sealed for `plugins.keys.import`, its
+ * member `/privateKey` and the plugin, then the import with the sealed
+ * value, approved. The signer keeps it as the realm's
+ * `upstream_client_assertion` key for `apple`. The private key is
+ * `team.privateKeyPem`, the `.p8` file run.sh made; the answers are left to
+ * the caller to check.
  */
-async function importAppleKey(): Promise<void> {
-  throw new Error(
-    'qauth-labs/qauth#1073: the server can neither import the key Apple issues nor read the Team ID yet'
+async function importAppleKey(): Promise<{ sealed: AdminAnswer; imported: AdminAnswer }> {
+  const sealed = await admin.call('POST', '/secrets/seal', {
+    operation: 'plugins.keys.import',
+    member: '/privateKey',
+    params: { plugin: 'apple' },
+    value: team.privateKeyPem,
+  });
+  expect(sealed.status, JSON.stringify(sealed.body)).toBe(200);
+  const body = { kid: team.keyId, privateKey: { sealed: sealed.body['sealed'] } };
+  const imported = await admin.call('POST', '/plugins/apple/keys', body, {
+    'qauth-approval': await admin.approved('plugins.keys.import', body),
+  });
+  return { sealed, imported };
+}
+
+/** The realm's client-assertion keys for Apple: kid, status and algorithm. */
+function appleKeys(): string[] {
+  return sql(
+    `SELECT kid, status, algorithm FROM realm_keys
+     WHERE realm_id = ${literal(realmId)} AND purpose = 'upstream_client_assertion'
+       AND scope_id = 'apple' ORDER BY created_at, kid`
   );
+}
+
+/** The base64 lines of a PEM, cut short: what would show if any part of the key leaked. */
+function pemBody(pem: string): string[] {
+  return pem
+    .split('\n')
+    .filter((line) => line.length > 0 && !line.startsWith('-----'))
+    .map((line) => line.slice(0, 40));
 }
 
 /** The accounts the Apple credential of `sub` belongs to. */
@@ -328,6 +374,12 @@ describe('the boot', () => {
     });
   });
 
+  it('refuses the team’s key before the plugin is configured: no configuration names its algorithm', async () => {
+    const { imported } = await importAppleKey();
+    expect(imported.status, JSON.stringify(imported.body)).toBe(409);
+    expect(appleKeys()).toEqual([]);
+  });
+
   it('takes the Services ID and the Team ID as the realm’s config, and enables the plugin', async () => {
     await configure();
     const plugin = await admin.call('GET', '/plugins/apple');
@@ -336,10 +388,20 @@ describe('the boot', () => {
       config: { clientId: team.servicesId, teamId: team.teamId },
       secrets: [],
     });
+    // The client the signer signs Apple's client secret for, as the admin
+    // API stored it beside the config: the Services ID, the Team ID as the
+    // assertion issuer, and the algorithm of the key Apple issues.
+    expect(
+      sql(
+        `SELECT assertion_client_id, assertion_issuer, assertion_algorithm
+         FROM realm_auth_method_plugins
+         WHERE realm_id = ${literal(realmId)} AND plugin_id = 'apple'`
+      )
+    ).toEqual([`${team.servicesId}|${team.teamId}|ES256`]);
   });
 });
 
-describe('a sign-in, while the server cannot sign the client secret (qauth-labs/qauth#1073)', () => {
+describe('a sign-in before the team’s key is imported', () => {
   const ada = person();
   let started: StartedSignIn;
   let fields: URLSearchParams;
@@ -395,24 +457,28 @@ describe('a sign-in, while the server cannot sign the client secret (qauth-labs/
     expect(user).not.toContain('@');
   });
 
-  it('then fails closed at the code exchange, and creates no account', async () => {
+  it('then fails closed at the code exchange: the signer holds no key for Apple, so nothing is sent and no account is created', async () => {
     const faultsBefore = failedSignIns('method_fault');
     const secretsBefore = (await clientSecrets()).length;
 
+    emptyKeyListReadAt = Date.now();
     const callback = await browse(started.jar, bounced);
 
     expect(callback.status).toBe(400);
     expect(await callback.text()).toContain(ERROR_TITLE);
     expect(callback.headers.get('location')).toBeNull();
     expect(failedSignIns('method_fault')).toBe(faultsBefore + 1);
-    // Why: the signer holds no client record for Apple in the realm, the
-    // part of qauth-labs/qauth#1073 that findUpstreamClient leaves out.
+    // Why: the realm's configuration names the client, but its key store
+    // holds no client-assertion key for Apple yet, and the signer never
+    // makes one up in its place.
     expect(logLinesOf('auth-server')).toContainEqual(
       expect.objectContaining({
         msg: 'upstream method fault',
         upstreamProvider: 'apple',
         err: expect.objectContaining({
-          message: expect.stringContaining('has no configuration for the upstream provider'),
+          message: expect.stringContaining(
+            "has no active 'ES256' key for purpose 'upstream_client_assertion'"
+          ),
         }),
       })
     );
@@ -499,20 +565,44 @@ describe('the mock Apple', () => {
   });
 });
 
-describe('once the server can sign the client secret (qauth-labs/qauth#1073)', () => {
+describe('once the team’s key is imported', () => {
+  it('imports the .p8 key under its Key ID, sealed and approved: it signs at once, and no answer, row or log line shows it', async () => {
+    const { sealed, imported } = await importAppleKey();
+
+    expect(imported.status, JSON.stringify(imported.body)).toBe(200);
+    expect(imported.body).toEqual({ kid: team.keyId, algorithm: 'ES256', status: 'active' });
+    expect(appleKeys()).toEqual([`${team.keyId}|active|ES256`]);
+    const answers = [JSON.stringify(sealed.body), JSON.stringify(imported.body)].join('\n');
+    const logs = logsOf('auth-server');
+    for (const seen of [answers, logs]) expect(seen).not.toContain('PRIVATE KEY');
+    const everywhere = [answers, logs, databaseDump()].join('\n');
+    for (const fragment of pemBody(team.privateKeyPem)) {
+      expect(everywhere.includes(fragment), 'a part of the private key').toBe(false);
+    }
+
+    // The sign-in before the import made the signer read Apple's key list
+    // empty, and it trusts that list for a minute: wait until it reads the
+    // list again, as an operator's next sign-in would within that minute.
+    if (emptyKeyListReadAt !== undefined) {
+      const wait = emptyKeyListReadAt + SIGNER_KEY_LIST_TRUSTED_MS + 1_000 - Date.now();
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }, 120_000);
+
   // Acceptance (qauth-labs/qauth#1076): the mock accepts the client secret
   // only with the expected claims, a 60-second life and a signature by the
   // imported key.
-  it.todo('signs a client secret the mock accepts: ES256 under the imported key and its Key ID, iss the Team ID, sub the Services ID, aud Apple, a 60-second life', async () => {
-    await importAppleKey();
-    await configure();
+  it('signs a client secret the mock accepts: ES256 under the imported key and its Key ID, iss the Team ID, sub the Services ID, aud Apple, a 60-second life', async () => {
     const before = (await clientSecrets()).length;
     const startedAt = Math.floor(Date.now() / 1000);
+    const who = person();
+    const users = userCount();
 
-    await signIn(person());
+    await signIn(who);
 
     const sent = (await clientSecrets()).slice(before);
     expect(sent).toHaveLength(1);
+    // The mock checked the signature with the public half of the team's key.
     expect(sent[0]).toMatchObject({
       accepted: true,
       header: { alg: 'ES256', kid: team.keyId },
@@ -521,14 +611,31 @@ describe('once the server can sign the client secret (qauth-labs/qauth#1073)', (
     const secret = sent[0]?.claims ?? {};
     expect(typeof secret['jti']).toBe('string');
     expect(Number(secret['iat'])).toBeGreaterThanOrEqual(startedAt - 5);
-    expect(Number(secret['exp']) - Number(secret['iat'])).toBeLessThanOrEqual(60);
+    expect(Number(secret['exp']) - Number(secret['iat'])).toBe(60);
+
+    // The first sign-in created the account: Apple's subject, under Apple's
+    // issuer, verified as a provider plugin's.
+    const [account = ''] = accountsOf(who.sub);
+    expect(account).not.toBe('');
+    expect(userCount()).toBe(users + 1);
+    expect(
+      sql(
+        `SELECT is_primary, credential_data->>'kind', credential_data->>'iss',
+                credential_data->>'verified'
+         FROM user_credentials WHERE user_id = ${literal(account)} AND provider_type = 'apple'`
+      )
+    ).toEqual([`t|upstream|${APPLE}|true`]);
+    expect(
+      sql(
+        `SELECT data->>'method' FROM events
+         WHERE type = ${literal(REGISTERED)} AND subject_id = ${literal(account)}`
+      )
+    ).toEqual(['upstream']);
   });
 
   // Acceptance (qauth-labs/qauth#1076): a cross-site form_post with a user
   // member stores the name once, and a later sign-in does not change it.
-  it.todo('stores the name of the first form_post once, and a later sign-in does not change it', async () => {
-    await importAppleKey();
-    await configure();
+  it('stores the name of the first form_post once, and a later sign-in does not change it', async () => {
     const ada = person();
     const before = userCount();
 
@@ -547,29 +654,37 @@ describe('once the server can sign the client secret (qauth-labs/qauth#1073)', (
 
     // A later sign-in whose browser posts another name: Apple sends no user
     // member after the first authorization, but the browser chooses it.
-    await signIn(ada, (fields) =>
+    await signIn(ada, (fields) => {
+      expect(fields.has('user')).toBe(false);
       fields.set(
         'user',
-        JSON.stringify({ name: { firstName: 'Grace', lastName: 'Hopper' }, email: ada.email })
-      )
-    );
+        JSON.stringify({
+          name: { firstName: 'Mallorie', lastName: 'Forgewright' },
+          email: ada.email,
+        })
+      );
+    });
     expect(accountsOf(ada.sub)).toEqual([account]);
     expect(attributesOf(account)).toEqual(stored);
 
     // And one without it, as Apple sends after the first.
-    await signIn(ada, (fields) => fields.delete('user'));
+    await signIn(ada);
     expect(accountsOf(ada.sub)).toEqual([account]);
     expect(attributesOf(account)).toEqual(stored);
     expect(userCount()).toBe(before + 1);
+
+    // The callback carried the names in its URL; the request log never shows them.
+    const logs = logsOf('auth-server');
+    for (const value of [ada.firstName, ada.lastName, 'Mallorie', 'Forgewright']) {
+      expect(logs.includes(value), `${value} in the logs`).toBe(false);
+    }
   });
 
   // Acceptance (qauth-labs/qauth#1076): a private relay address is not the
   // address mailed.
-  it.todo('keeps a private relay address apart from email, so it is never the address mailed', async () => {
-    await importAppleKey();
-    await configure();
+  it('keeps a private relay address apart from email, so it is never the address mailed', async () => {
     const relay = person({
-      email: 'x7d2kq9p@privaterelay.appleid.com',
+      email: `${randomBytes(5).toString('hex')}@privaterelay.appleid.com`,
       emailVerified: true,
       isPrivateEmail: 'true',
     });
@@ -577,14 +692,16 @@ describe('once the server can sign the client secret (qauth-labs/qauth#1073)', (
     const { code, verifier } = await signIn(relay);
 
     const [account = ''] = accountsOf(relay.sub);
+    expect(account).not.toBe('');
     expect(attributesOf(account)).toEqual([
       { key: 'family_name', value: relay.lastName, verified: false },
       { key: 'given_name', value: relay.firstName, verified: false },
       { key: 'private_relay_email', value: relay.email, verified: false },
     ]);
+    // No attribute of any source holds it as an email.
     expect(
       sql(
-        `SELECT 1 FROM user_attributes WHERE user_id = ${literal(account)} AND attr_key = 'email'`
+        `SELECT source FROM user_attributes WHERE user_id = ${literal(account)} AND attr_key = 'email'`
       )
     ).toEqual([]);
     // Nor is it the address QAuth gives the application.
@@ -599,8 +716,11 @@ describe('once the server can sign the client secret (qauth-labs/qauth#1073)', (
         code_verifier: verifier,
       }).toString(),
     });
-    expect(tokens.status).toBe(200);
-    const { id_token: idToken } = (await tokens.json()) as { id_token: string };
+    const answer = await tokens.text();
+    expect(tokens.status, answer).toBe(200);
+    expect(answer).not.toContain(relay.email);
+    const { id_token: idToken } = JSON.parse(answer) as { id_token: string };
     expect(claimsOf(idToken)).not.toHaveProperty('email');
+    expect(claimsOf(idToken)).not.toHaveProperty('email_verified');
   });
 });
