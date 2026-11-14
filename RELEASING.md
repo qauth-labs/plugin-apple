@@ -20,26 +20,6 @@ The package has its own version line, not QAuth's.
   AuthMethod contract each version is for. Update it in the same pull request
   as the version.
 
-## Before the first release
-
-The package is not released yet, and is not ready to be until two temporary
-stand-ins are replaced, in a pull request each or together:
-
-- **The plugin SDK from npm.** `package.json` depends on the tarball in
-  `vendor/` (`vendor/README.md`). Move it to the npm release of
-  `@qauth-labs/plugin-sdk` that carries qauth-labs/qauth#671, list that
-  version in `pnpm-workspace.yaml`'s `minimumReleaseAgeExclude` while it is
-  younger than 7 days, remove `vendor/`, and put `e2e/Dockerfile`'s plugin
-  stage back to the nested `npm install` its comment shows.
-- **The released server image.** The end-to-end suite builds QAuth's images
-  from the commit in `e2e/qauth-commit` (`e2e/qauth-images.sh`). Move
-  `e2e/run.sh`'s defaults to the first released `auth-server` and
-  `migration-runner` images that carry the preset loader, pinned by digest,
-  and remove `e2e/qauth-commit`, `e2e/qauth-images.sh` and its CI step.
-
-Sign-in itself needs qauth-labs/qauth#1073 in that server release; then turn
-on the end-to-end suite's `it.todo` cases.
-
 ## Cut a release
 
 1. In a pull request, set `version` in `package.json` (for example

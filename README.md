@@ -5,16 +5,6 @@
 > this package may change before QAuth 1.0. Do not rely on it for production
 > sign-in yet.
 
-> **Known gap: Sign in with Apple does not work on a deployment yet.** Apple's
-> client secret is a JWT that QAuth's signer signs with the key Apple issues,
-> as the developer team's Team ID. The signer can neither import that key nor
-> read the Team ID yet
-> ([qauth-labs/qauth#1073](https://github.com/qauth-labs/qauth/issues/1073)),
-> so the code exchange fails closed: the person sees "We could not sign you
-> in", and no account is created. Everything before the code exchange works.
-> The end-to-end cases that need the signer are written and marked `it.todo`
-> (see [Develop](#develop)).
-
 Sign in with Apple for [QAuth](https://github.com/qauth-labs/qauth), as a
 preset on QAuth's own OpenID Connect client. A realm that enables it offers
 "Apple" as an upstream sign-in: the person signs in at Apple, and QAuth signs
@@ -28,26 +18,19 @@ there reaches this plugin with a server release. The package exports an
 `upstreamOidcPreset`, made with `defineUpstreamOidcPreset` of the plugin SDK
 ([QAuth's docs: Extend → Write a preset plugin](https://docs.qauth.dev/extend/preset-plugins/)).
 It is made and released by the QAuth project in its own repository, the way a
-third party writes a plugin: it depends only on `@qauth-labs/plugin-sdk`, and
-has its own version line.
-
-> **Temporary.** Two things stand in for releases that do not exist yet; this
-> package is not on npm until both are replaced.
->
-> - The plugin SDK with the preset shape
->   ([qauth-labs/qauth#671](https://github.com/qauth-labs/qauth/issues/671)) is
->   not on npm yet. The package depends on the tarball in `vendor/`, packed by
->   QAuth's own release dry run, until the SDK release that carries #671 is
->   published.
-> - No released QAuth server image carries the preset loader yet. The
->   end-to-end suite builds the server and migration-runner images from the
->   QAuth commit `e2e/qauth-commit` names, until a release carries it.
+third party writes a plugin: it depends only on the published
+[`@qauth-labs/plugin-sdk`](https://www.npmjs.com/package/@qauth-labs/plugin-sdk)
+and has its own version line.
 
 ## Compatibility
 
-| Plugin                       | QAuth server                                                    | AuthMethod contract        | Plugin SDK                                              |
-| ---------------------------- | --------------------------------------------------------------- | -------------------------- | ------------------------------------------------------- |
-| `0.1.0-rc.0` (not published) | the commit in `e2e/qauth-commit`; no release carries the loader | `qauth-auth-method/1-rc.0` | vendored from qauth-labs/qauth#1069 (not npm's `0.2.2`) |
+| Plugin       | QAuth server               | AuthMethod contract        | Plugin SDK |
+| ------------ | -------------------------- | -------------------------- | ---------- |
+| `0.1.0-rc.0` | `0.2.4` and later on `0.2` | `qauth-auth-method/1-rc.0` | `0.2.4`    |
+
+QAuth `0.2.4` is the first release whose signer imports the key Apple issues
+and signs as the Team ID
+([qauth-labs/qauth#1073](https://github.com/qauth-labs/qauth/issues/1073)).
 
 ## What it is
 
@@ -84,8 +67,7 @@ and the sign-in page shows the provider's name.
    name from `user` on.
 3. **Token exchange.** The server redeems the code at
    `https://appleid.apple.com/auth/token` with the PKCE verifier and a client
-   secret its signer signs (below). This is where a deployment stops today
-   (qauth-labs/qauth#1073).
+   secret its signer signs (below).
 4. **The person.** The server checks Apple's ID token (RS256, Apple's key
    set, the issuer, the Services ID as audience, the `nonce`). The account is
    Apple's `sub`, under Apple's issuer; Apple's `sub` is stable for the
@@ -105,19 +87,12 @@ request the server's signer role signs one with the realm's
   minute.
 
 The key is the one the developer team created at Apple for Sign in with
-Apple, imported into QAuth's signer, never into the plugin.
-
-**Status.** Two things are missing, both in qauth-labs/qauth#1073:
-
-- the signer cannot import a key the provider issued (it generates its own
-  `upstream_client_assertion` keys);
-- the signer reads no provider's client record (`findUpstreamClient` answers
-  none), so it does not know the Services ID and the Team ID it signs as.
-  The realm's config holds the Team ID (`teamId`), but the plugin SDK gives a
-  preset no way yet to name it as the issuer of its signed client secret.
-
-Until both exist, the signer signs nothing for Apple, and every sign-in fails
-closed at the code exchange.
+Apple, imported into QAuth's signer under its Key ID (step 5 below), never
+into the plugin. The provider config names the realm's `teamId` as the signed
+client secret's `assertionIssuer`; the admin API stores it, with the Services
+ID, beside the realm's config, and the signer reads them from there. Until a
+key is imported, the signer signs nothing for Apple: a sign-in fails closed
+at the code exchange, and nothing is sent to Apple's token endpoint.
 
 ### The name and the address
 
@@ -128,7 +103,11 @@ closed at the code exchange.
   `family_name`, unverified: the browser chooses that member, and Apple does
   not sign it. QAuth stores a provider's attributes when it creates the
   account, so a later sign-in, which carries no name, or a forged one, never
-  changes them.
+  changes them. A name part is kept trimmed, at most 256 characters, and
+  only when it passes the plugin SDK's display rule: no markup bracket, and
+  no control, format (a bidirectional override, a zero-width character),
+  private-use or unassigned character and no line separator, so no name
+  reads as another where it is shown.
 - **A private relay address** (`is_private_email`, or an address at
   `privaterelay.appleid.com`) forwards mail only from senders the developer
   team registered with Apple's private email relay service. Unless the
@@ -147,8 +126,8 @@ closed at the code exchange.
 
 ## Install it (operators)
 
-Once a release of this plugin is on npm (see the notes above), with a QAuth
-server whose release carries the preset loader.
+You need QAuth `0.2.4` or later, and an image you build on top of QAuth's
+released one.
 
 ### 1. Register at Apple
 
@@ -160,7 +139,7 @@ In Apple's developer account, under Certificates, Identifiers & Profiles:
   realm host: `https://<realm host>/upstream/apple/callback`.
 - Create a **key** with Sign in with Apple enabled, download it (a `.p8`
   file, which Apple lets you download once) and note its **Key ID**. The key
-  goes into QAuth's signer (step 4), never into this plugin's config.
+  goes into QAuth's signer (step 5), never into this plugin's config.
 
 ### 2. Add the package to the server image
 
@@ -171,14 +150,14 @@ image): write a lockfile in a `plugins/` directory of your build context,
 mkdir plugins && cd plugins
 npm init --yes > /dev/null
 npm install --package-lock-only --save-exact --omit=dev --omit=peer \
-  --install-strategy=nested --ignore-scripts @qauth-labs/plugin-apple@<version>
+  --install-strategy=nested --ignore-scripts @qauth-labs/plugin-apple@0.1.0-rc.0
 ```
 
 read it, commit both files, and install it into a separate stage, nested, so
 it brings its own copy of the plugin SDK and uses the server's own `zod`:
 
 ```dockerfile
-ARG QAUTH_IMAGE=ghcr.io/qauth-labs/qauth/auth-server:<version>@sha256:<digest>
+ARG QAUTH_IMAGE=ghcr.io/qauth-labs/qauth/auth-server:0.2.4@sha256:<digest>
 
 FROM node:26-alpine@sha256:<digest> AS plugin
 WORKDIR /plugin
@@ -207,13 +186,7 @@ does not load it and logs why: `The AuthMethod plugin @qauth-labs/plugin-apple
 is not loaded: it is not a first-party plugin, and the experimental plugin API
 is off. …`
 
-### 4. Import Apple's key into the signer
-
-Not possible yet: qauth-labs/qauth#1073 adds the operation that imports the
-`.p8` key under its Key ID as the realm's `upstream_client_assertion` key for
-`apple`. Until then, sign-in stops at the code exchange.
-
-### 5. Configure it for a realm
+### 4. Configure it for a realm
 
 Through QAuth's admin API, per realm (`{realm}` is the realm's id, `apple` the
 plugin's name):
@@ -237,7 +210,39 @@ secret, so nothing is sealed.
 A config with a client secret, a key or any other member is refused. Once
 enabled, the realm's sign-in offers Apple, and an application can send the
 browser straight to it with `qauth_upstream=apple` on `/oauth/authorize`. A
-first sign-in creates an account when the realm allows sign-up.
+first sign-in creates an account when the realm allows sign-up, once the key
+is in the signer (step 5).
+
+### 5. Import Apple's key into the signer
+
+After the plugin is configured for the realm, import the `.p8` file with its
+Key ID. Its configuration names the algorithm the key must have, ES256, so an
+import before it is refused with `409`. QAuth's docs give the whole procedure
+and the key's rules:
+[Operate → Keys → A provider-issued client-assertion key](https://docs.qauth.dev/operate/keys/#a-provider-issued-client-assertion-key).
+
+1. Seal the `.p8` file's contents for the import:
+   `POST /admin/v1-rc.0/realms/{realm}/secrets/seal` with
+   `{"operation": "plugins.keys.import", "member": "/privateKey", "params": {"plugin": "apple"}, "value": "<the .p8 file's contents>"}`.
+   The answer's `sealed` value opens only in that import.
+2. Import it: `POST /admin/v1-rc.0/realms/{realm}/plugins/apple/keys` with
+   `{"kid": "<Key ID>", "privateKey": {"sealed": "<sealed>"}}`. It answers
+   `{"kid": "<Key ID>", "algorithm": "ES256", "status": "active"}`: the first
+   key signs at once.
+
+The import is a security operation (`plugins.keys.import`): it needs
+`qauth:admin:security` and an approval (`QAuth-Approval` header). The signer
+keeps the key sealed under the KEK; no answer, approval, audit row or log
+line shows it, and a deployment on the published development KEK refuses
+it. Keep the `.p8` file until the import answered `200`, then delete it
+wherever it passed through. A process that read the realm's key list before
+the import signs with the key within a minute.
+
+To replace the key, create a new one at Apple while the old one works,
+import it (it waits as `next`), and switch to it with
+`POST /admin/v1-rc.0/realms/{realm}/plugins/apple/keys/activate` and
+`{"kid": "<new Key ID>"}` (`plugins.keys.activate`, approved). Revoke the old
+key at Apple a minute after the switch.
 
 ## Develop
 
@@ -253,57 +258,53 @@ pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm test
 
 `pnpm test` runs the unit tests and the plugin SDK's preset kit
 (`checkUpstreamOidcPreset`) on each config shape. They cover the config
-schema, the provider config (the signed client secret, the Services ID as the
-client id), the `user` member's map and its cap, the name rules, the relay
-rule and the attribute rules. The protocol is the server's, so the full
-sign-in is the end-to-end suite's.
+schema, the provider config (the signed client secret, the Team ID as its
+`assertionIssuer`, the Services ID as the client id), the `user` member's
+map and its cap, the name rules, the relay rule and the attribute rules. The
+protocol is the server's, so the full sign-in is the end-to-end suite's.
 
-The end-to-end suite needs docker, git, openssl, Node and pnpm:
+The end-to-end suite needs docker, openssl, Node and pnpm:
 
 ```sh
 pnpm run e2e
 ```
 
-It builds QAuth's server and migration-runner images from the commit in
-`e2e/qauth-commit` (`e2e/qauth-images.sh`, skipped when both are present),
-packs the plugin, adds it to the server image, starts it with PostgreSQL,
-Redis and a mock Apple, configures the plugin through the admin API and
-signs in through the server's pages. The mock answers at
+It packs the plugin, builds QAuth's released server image with the plugin
+added as above, starts it with its migration runner, PostgreSQL, Redis and a
+mock Apple, configures the plugin and imports the team's key through the
+admin API, and signs in through the server's pages. The mock answers at
 `appleid.apple.com`, on a public address range: a preset's calls go to its
 origins as remote documents, which the egress allowlist never opens to a
 private address. It checks that:
 
 - the boot loads the plugin as a preset, and with `PLUGIN_API_ENABLED` off
   skips it and says why;
-- the admin API lists it with no secret member, and takes the Services ID and
-  the Team ID;
+- the admin API lists it with no secret member, refuses the key before the
+  plugin is configured, and takes the Services ID and the Team ID, which it
+  stores as the client the signer signs for;
 - the authorization request goes to Apple with `response_mode=form_post`,
   for the name and the email;
 - Apple's cross-site `form_post` is bounced to the `GET` callback, carrying
   only the name of the `user` member;
-- the code exchange then fails closed (qauth-labs/qauth#1073), with no token
+- before the key is imported, the code exchange fails closed, with no token
   request sent and no account created, and the name and the address of the
   `user` member are in neither the logs nor the database;
-- the mock takes a client secret only as Apple does.
-
-Written out and marked `it.todo` until qauth-labs/qauth#1073 lets the server
-sign the client secret (turn each on once `importAppleKey` in the suite can
-call the server):
-
-- the mock accepts the client secret only with the expected claims, a
-  60-second life and a signature by the imported key;
+- the mock takes a client secret only as Apple does;
+- the key imports sealed and approved under its Key ID, signs at once, and
+  shows in no answer, row or log line;
+- the mock accepts the client secret the signer signs: ES256 under the
+  imported key and its Key ID, `iss` the Team ID, `sub` the Services ID,
+  `aud` Apple, a 60-second life; the first sign-in creates the account;
 - a cross-site `form_post` with a `user` member stores the name once, and a
-  later sign-in does not change it;
-- a private relay address is not the address mailed.
+  later sign-in, with another name or none, does not change it;
+- a private relay address is kept as `private_relay_email`, never as
+  `email`, and the application's ID token carries no email.
 
 CI runs both on every pull request. Releases are described in
 [RELEASING.md](RELEASING.md).
 
 ## Not yet
 
-- Sign-in fails closed at the code exchange until qauth-labs/qauth#1073: the
-  signer imports the key Apple issues, reads the Services ID and the Team ID,
-  and the plugin SDK lets a preset name its signed client secret's issuer.
 - Apple answers a cancelled sign-in with `user_cancelled_authorize`, which
   ends as a failed sign-in, not a declined one.
 - Validated against a mock provider only, not against Apple itself.
